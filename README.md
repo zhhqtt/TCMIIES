@@ -99,7 +99,7 @@ TCMIIES/
 
 ## 许可证
 
-本项目仅供河北大学中医药信息学实验室内部使用。
+BSD 3-Clause License
 
 ---
 
