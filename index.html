@@ -1,0 +1,1016 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>河北大学中医药信息学实验室论文信息智能提取系统</title>
+</head>
+<body>
+<div id="loading" style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#666">
+<p>正在加载，请稍候...</p>
+</div>
+<div id="app" style="display:none">
+<div class="top-nav">
+<span class="nav-title">河北大学中医药信息学实验室论文信息智能提取系统</span>
+<div class="nav-tabs">
+<button class="nav-tab" v-bind:class="{active:tab==='api'}" v-on:click="tab='api'">API配置</button>
+<button class="nav-tab" v-bind:class="{active:tab==='upload'}" v-on:click="tab='upload'">数据上传</button>
+<button class="nav-tab" v-bind:class="{active:tab==='config'}" v-on:click="tab='config'">提取配置</button>
+<button class="nav-tab" v-bind:class="{active:tab==='task'}" v-on:click="tab='task'">任务执行</button>
+<button class="nav-tab" v-bind:class="{active:tab==='result'}" v-on:click="tab='result'">结果导出</button>
+</div>
+</div>
+<div class="toast-box">
+<div v-for="t in toasts" v-bind:key="t.id" class="toast-item" v-bind:class="'toast-'+t.type">{{t.msg}}</div>
+</div>
+<div v-if="modalShow" class="modal-mask" v-on:click.self="modalShow=false">
+<div class="modal-box">
+<div class="modal-title"><span>{{modalTitle}}</span><button class="modal-close" v-on:click="modalShow=false">X</button></div>
+<div class="modal-body">{{modalBody}}</div>
+</div>
+</div>
+<div class="main-content">
+
+<div v-show="tab==='api'">
+<div class="card">
+<div class="card-title">API服务配置</div>
+<div v-if="api.provider==='openai'" class="alert alert-warning">OpenAI官方API可能存在CORS限制，建议配置代理Base URL或使用国内服务商。</div>
+<div class="form-row">
+<div class="form-group">
+<label class="form-label">服务商</label>
+<select class="form-select" v-model="api.provider" v-on:change="onProviderChange">
+<option value="openai">OpenAI</option>
+<option value="qwen">通义千问</option>
+<option value="zhipu">智谱AI</option>
+<option value="deepseek">DeepSeek</option>
+<option value="custom">自定义</option>
+</select>
+</div>
+<div class="form-group">
+<label class="form-label">Base URL</label>
+<input class="form-input" v-model="api.baseURL" placeholder="https://api.example.com/v1">
+</div>
+</div>
+<div class="form-row">
+<div class="form-group">
+<label class="form-label">API Key</label>
+<div class="pwd-wrap">
+<input class="form-input" v-bind:type="showKey?'text':'password'" v-model="api.apiKey" placeholder="sk-...">
+<button class="pwd-toggle" v-on:click="showKey=!showKey">{{showKey?'隐藏':'显示'}}</button>
+</div>
+</div>
+<div class="form-group">
+<label class="form-label">模型</label>
+<select class="form-select" v-model="api.model">
+<option v-for="m in modelOptions" v-bind:key="m" v-bind:value="m">{{m}}</option>
+</select>
+</div>
+</div>
+<div class="form-row">
+<div class="form-group">
+<label class="form-label">自定义模型名（回车添加）</label>
+<input class="form-input" v-model="customModel" placeholder="输入模型名按回车" v-on:keydown.enter.prevent="addCustomModel">
+</div>
+<div class="form-group">
+<label class="form-label">并发数 (1-10)</label>
+<input class="form-input" type="number" v-model.number="api.concurrency" min="1" max="10">
+</div>
+<div class="form-group">
+<label class="form-label">请求间隔(ms)</label>
+<input class="form-input" type="number" v-model.number="api.interval" min="0" max="10000" step="100">
+</div>
+</div>
+<div style="display:flex;gap:12px;margin-top:8px">
+<button class="btn btn-primary" v-on:click="testConn" v-bind:disabled="testing">
+<span v-if="testing" class="spinner"></span>
+{{testing?'测试中...':'测试连接'}}
+</button>
+<button class="btn btn-success" v-on:click="saveConfig">保存配置</button>
+</div>
+</div>
+</div>
+
+<div v-show="tab==='upload'">
+<div class="card">
+<div class="card-title">数据上传</div>
+<div class="drop-zone" v-bind:class="{dragover:isDragover}" v-on:dragover.prevent="isDragover=true" v-on:dragleave="isDragover=false" v-on:drop.prevent="onDrop" v-on:click="pickFile">
+<div class="drop-zone-icon">+</div>
+<div class="drop-zone-text">拖拽文件到此处，或点击选择文件</div>
+<div class="drop-zone-hint">支持 xlsx、xls、csv 格式</div>
+</div>
+<input ref="fileInput" type="file" accept=".xlsx,.xls,.csv" style="display:none" v-on:change="onFileSelect">
+<div v-if="fileWarn" class="alert alert-warning" style="margin-top:16px">{{fileWarn}}</div>
+</div>
+<div v-if="fileData.columns.length" class="card">
+<div class="card-title">数据预览</div>
+<div class="stats-cards">
+<div class="stat-card"><div class="stat-value">{{fileData.rows.length}}</div><div class="stat-label">总行数</div></div>
+<div class="stat-card"><div class="stat-value">{{fileData.columns.length}}</div><div class="stat-label">列数</div></div>
+<div class="stat-card"><div class="stat-value" style="font-size:14px">{{fileData.fileName}}</div><div class="stat-label">文件名</div></div>
+</div>
+<div style="margin-bottom:12px">
+<span style="font-size:13px;color:#64748b">列名：</span>
+<span class="tag" v-for="col in fileData.columns" v-bind:key="col">{{col}}</span>
+</div>
+<div v-if="mappedFields.length" style="margin-bottom:12px">
+<span style="font-size:13px;color:#64748b">已识别字段：</span>
+<span class="tag tag-success" v-for="m in mappedFields" v-bind:key="m.from">{{m.from}} -> {{m.to}}</span>
+</div>
+<div class="table-wrap">
+<table class="data-table">
+<thead><tr><th>序号</th><th v-for="col in fileData.columns" v-bind:key="col">{{col}}</th></tr></thead>
+<tbody>
+<tr v-for="(row,idx) in previewRows" v-bind:key="idx">
+<td>{{idx+1}}</td>
+<td v-for="col in fileData.columns" v-bind:key="col" v-bind:title="row[col]||''">{{row[col]||''}}</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div style="font-size:12px;color:#94a3b8;margin-top:8px">显示前 10 行，共 {{fileData.rows.length}} 行数据</div>
+</div>
+</div>
+
+<div v-show="tab==='config'">
+<div class="two-col">
+<div>
+<div class="card">
+<div class="card-title">字段配置</div>
+<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+<button class="btn btn-outline btn-sm" v-on:click="loadTpl('paper')">论文基础信息提取</button>
+<button class="btn btn-outline btn-sm" v-on:click="loadTpl('review')">文献综述分析</button>
+</div>
+<div class="form-group">
+<label class="form-label">字段名称 *</label>
+<input class="form-input" v-model="newField.name" placeholder="例如：研究主题">
+</div>
+<div class="form-group">
+<label class="form-label">字段描述 *</label>
+<input class="form-input" v-model="newField.desc" placeholder="例如：研究的核心问题是什么">
+</div>
+<div class="form-row">
+<div class="form-group">
+<label class="form-label">类型</label>
+<select class="form-select" v-model="newField.type">
+<option value="text">文本</option>
+<option value="number">数字</option>
+<option value="list">列表</option>
+<option value="boolean">布尔值</option>
+</select>
+</div>
+<div class="form-group" style="display:flex;align-items:flex-end;padding-bottom:4px">
+<label class="chk-wrap"><input type="checkbox" v-model="newField.required"><span style="font-size:13px">必填</span></label>
+</div>
+<div class="form-group" style="display:flex;align-items:flex-end">
+<button class="btn btn-primary btn-sm" v-on:click="addField" v-bind:disabled="!newField.name||!newField.desc">添加</button>
+</div>
+</div>
+<div v-if="fields.length" style="margin-top:16px">
+<div style="font-size:14px;font-weight:600;color:#475569;margin-bottom:8px">已配置字段 ({{fields.length}})</div>
+<div v-for="(f,i) in fields" v-bind:key="i" class="field-item">
+<div class="field-info">
+<span class="field-name">{{f.name}}</span>
+<span class="field-desc">{{f.desc}}</span>
+</div>
+<div class="field-meta">
+<span class="tag">{{typeMap[f.type]||'文本'}}</span>
+<span v-if="f.required" class="tag tag-danger">必填</span>
+<button class="btn btn-danger btn-sm" v-on:click="removeField(i)">X</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div>
+<div class="card">
+<div class="card-title">提示词编辑</div>
+<div class="form-group">
+<label class="form-label">System Prompt（系统提示词）</label>
+<textarea class="form-textarea" v-model="sysPrompt" rows="10" placeholder="系统提示词..."></textarea>
+</div>
+<div class="form-group">
+<label class="form-label">User Prompt 模板（用双花括号包裹列名来插入数据，如: 摘要内容）</label>
+<textarea class="form-textarea" v-model="userPromptTpl" rows="8" placeholder="用户提示词模板..."></textarea>
+<div v-if="fileData.columns.length" style="margin-top:8px">
+<span style="font-size:12px;color:#64748b">可用变量（点击插入）：</span>
+<div class="var-list">
+<span class="var-tag" v-for="col in fileData.columns" v-bind:key="col" v-on:click="insertVar(col)">{{col}}</span>
+</div>
+</div>
+</div>
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+<button class="btn btn-secondary btn-sm" v-on:click="genSysPrompt">自动生成System Prompt</button>
+<button class="btn btn-outline btn-sm" v-on:click="previewPrompt" v-bind:disabled="!fileData.rows.length">预览提示词</button>
+<button class="btn btn-warning btn-sm" v-on:click="singleTest" v-bind:disabled="!fileData.rows.length||!api.apiKey">单条测试</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+<div v-show="tab==='task'">
+<div class="card">
+<div class="card-title">任务执行</div>
+<div v-if="!api.apiKey" class="alert alert-warning">请先在「API配置」页面配置API Key</div>
+<div v-if="!fileData.rows.length" class="alert alert-warning">请先在「数据上传」页面上传数据文件</div>
+<div v-if="!fields.length" class="alert alert-warning">请先在「提取配置」页面配置提取字段</div>
+<div style="margin-bottom:16px">
+<button class="btn btn-primary btn-lg" v-on:click="startTask" v-bind:disabled="!canStart||running">
+{{running?'执行中...':'开始提取'}}
+</button>
+</div>
+<div v-if="progress.total>0">
+<div style="margin-bottom:12px">
+<div class="progress-wrap">
+<div class="progress-fill" v-bind:style="{width:percent+'%'}"></div>
+<span class="progress-text">{{percent}}%</span>
+</div>
+<div style="display:flex;justify-content:space-between;font-size:12px;color:#64748b;margin-top:4px">
+<span>已处理 {{progress.done}} / {{progress.total}}</span>
+<span v-if="progress.curTitle">当前: {{progress.curTitle}}</span>
+</div>
+</div>
+<div class="task-stats">
+<div class="task-stat s"><div class="val">{{progress.ok}}</div><div class="lbl">成功</div></div>
+<div class="task-stat f"><div class="val">{{progress.fail}}</div><div class="lbl">失败</div></div>
+<div class="task-stat t"><div class="val">{{fmtTok(progress.tokens)}}</div><div class="lbl">估算Token</div></div>
+<div class="task-stat e"><div class="val">{{fmtTime(progress.eta)}}</div><div class="lbl">预估剩余</div></div>
+</div>
+<div class="ctrl-bar">
+<button v-if="running" class="btn btn-warning btn-sm" v-on:click="paused=!paused">{{paused?'继续':'暂停'}}</button>
+<button v-if="running" class="btn btn-danger btn-sm" v-on:click="cancelled=true">取消</button>
+</div>
+</div>
+<div v-if="progress.total>0&&!running&&progress.done>0" class="alert alert-success" style="margin-top:12px">
+任务完成！成功 {{progress.ok}} 条，失败 {{progress.fail}} 条。前往「结果导出」查看。
+</div>
+</div>
+</div>
+
+<div v-show="tab==='result'">
+<div class="card">
+<div class="card-title">结果预览与导出</div>
+<div v-if="!results.length" class="empty-state">
+<div class="empty-state-icon">!</div>
+<div>暂无提取结果，请先执行提取任务</div>
+</div>
+<div v-else>
+<div class="export-opts">
+<div class="form-group">
+<label class="form-label">导出范围</label>
+<select class="form-select" v-model="exportScope">
+<option value="all">原始+提取字段</option>
+<option value="extract">仅提取字段</option>
+</select>
+</div>
+<div class="form-group">
+<label class="form-label">导出格式</label>
+<select class="form-select" v-model="exportFmt">
+<option value="xlsx">Excel (.xlsx)</option>
+<option value="csv">CSV</option>
+<option value="json">JSON</option>
+</select>
+</div>
+<div class="form-group" style="display:flex;align-items:flex-end">
+<button class="btn btn-primary" v-on:click="doExport">导出文件</button>
+</div>
+</div>
+<div class="table-wrap" style="max-height:500px;overflow-y:auto">
+<table class="data-table">
+<thead>
+<tr>
+<th style="width:50px">序号</th>
+<template v-if="exportScope==='all'">
+<th v-for="col in fileData.columns" v-bind:key="'h'+col">{{col}}</th>
+</template>
+<th v-for="f in fields" v-bind:key="'e'+f.name">{{f.name}}</th>
+<th style="width:70px">状态</th>
+<th style="width:70px">操作</th>
+</tr>
+</thead>
+<tbody>
+<tr v-for="(r,i) in results" v-bind:key="i" v-bind:class="{'row-failed':r.status==='failed'}">
+<td>{{i+1}}</td>
+<template v-if="exportScope==='all'">
+<td v-for="col in fileData.columns" v-bind:key="'c'+col" v-bind:title="r.orig[col]||''">{{r.orig[col]||''}}</td>
+</template>
+<td v-for="f in fields" v-bind:key="'v'+f.name" class="editable" v-on:dblclick="startEdit(i,f.name,$event)">
+<template v-if="editCell&&editCell.ri===i&&editCell.fi===f.name">
+<input v-bind:value="getVal(r,f.name)" v-on:blur="endEdit(r,f.name,$event)" v-on:keydown.enter="$event.target.blur()">
+</template>
+<template v-else>{{getVal(r,f.name)}}</template>
+</td>
+<td>
+<span v-if="r.status==='success'" class="tag tag-success">成功</span>
+<span v-else class="tag tag-danger">失败</span>
+</td>
+<td>
+<button v-if="r.status==='failed'" class="btn btn-warning btn-sm" v-on:click="retryOne(i)">重试</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div style="margin-top:16px">
+<button class="btn btn-danger btn-sm" v-on:click="clearAll">清除所有数据</button>
+</div>
+</div>
+</div>
+</div>
+
+</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/vue@3.4.21/dist/vue.global.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;background:#f0f2f5;color:#333;min-width:1280px}
+.top-nav{position:fixed;top:0;left:0;right:0;height:56px;background:linear-gradient(135deg,#3b82f6,#2563eb);display:flex;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:1000;padding:0 24px}
+.nav-title{color:#fff;font-size:18px;font-weight:700;margin-right:40px;white-space:nowrap}
+.nav-tabs{display:flex;gap:4px}
+.nav-tab{padding:8px 18px;color:rgba(255,255,255,.8);cursor:pointer;border-radius:6px 6px 0 0;font-size:14px;border:none;background:transparent;white-space:nowrap}
+.nav-tab:hover{color:#fff;background:rgba(255,255,255,.15)}
+.nav-tab.active{color:#fff;background:rgba(255,255,255,.25);font-weight:600}
+.main-content{margin-top:72px;padding:24px;max-width:1400px;margin-left:auto;margin-right:auto}
+.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:24px;margin-bottom:20px}
+.card-title{font-size:16px;font-weight:600;margin-bottom:16px;color:#1e293b;display:flex;align-items:center;gap:8px}
+.form-group{margin-bottom:16px}
+.form-label{display:block;font-size:13px;font-weight:500;color:#64748b;margin-bottom:6px}
+.form-input,.form-select,.form-textarea{width:100%;padding:8px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;outline:none;font-family:inherit}
+.form-input:focus,.form-select:focus,.form-textarea:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.1)}
+.form-textarea{resize:vertical;min-height:100px}
+.form-row{display:flex;gap:16px;align-items:flex-end}
+.form-row .form-group{flex:1}
+.btn{padding:8px 20px;border:none;border-radius:8px;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-weight:500;transition:all .2s}
+.btn-primary{background:#3b82f6;color:#fff}
+.btn-primary:hover{background:#2563eb}
+.btn-success{background:#10b981;color:#fff}
+.btn-success:hover{background:#059669}
+.btn-danger{background:#ef4444;color:#fff}
+.btn-danger:hover{background:#dc2626}
+.btn-warning{background:#f59e0b;color:#fff}
+.btn-warning:hover{background:#d97706}
+.btn-secondary{background:#64748b;color:#fff}
+.btn-secondary:hover{background:#475569}
+.btn-outline{background:#fff;color:#3b82f6;border:1px solid #3b82f6}
+.btn-outline:hover{background:#3b82f6;color:#fff}
+.btn-sm{padding:4px 12px;font-size:12px}
+.btn-lg{padding:12px 32px;font-size:16px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.alert{padding:12px 16px;border-radius:8px;font-size:13px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.alert-warning{background:#fef3c7;color:#92400e;border:1px solid #fde68a}
+.alert-info{background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe}
+.alert-success{background:#d1fae5;color:#065f46;border:1px solid #a7f3d0}
+.alert-error{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
+.pwd-wrap{position:relative}
+.pwd-wrap .form-input{padding-right:60px}
+.pwd-toggle{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:13px;color:#94a3b8;padding:4px}
+.stats-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px}
+.stat-card{background:linear-gradient(135deg,#eff6ff,#dbeafe);border-radius:12px;padding:20px;text-align:center}
+.stat-value{font-size:28px;font-weight:700;color:#3b82f6}
+.stat-label{font-size:13px;color:#64748b;margin-top:4px}
+.tag{display:inline-block;padding:4px 10px;background:#eff6ff;color:#3b82f6;border-radius:20px;font-size:12px;margin:2px 4px 2px 0}
+.tag-success{background:#d1fae5;color:#065f46}
+.tag-danger{background:#fee2e2;color:#991b1b}
+.table-wrap{overflow-x:auto;border:1px solid #e2e8f0;border-radius:8px}
+.data-table{width:100%;border-collapse:collapse;font-size:13px}
+.data-table th{background:#f8fafc;padding:10px 12px;text-align:left;font-weight:600;color:#475569;border-bottom:2px solid #e2e8f0;white-space:nowrap}
+.data-table td{padding:8px 12px;border-bottom:1px solid #f1f5f9;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.data-table tbody tr:nth-child(even){background:#f8fafc}
+.data-table tbody tr:hover{background:#eff6ff}
+.row-failed{background:#fee2e2 !important}
+.row-failed:hover{background:#fecaca !important}
+td.editable{cursor:pointer}
+.drop-zone{border:2px dashed #cbd5e1;border-radius:12px;padding:48px 24px;text-align:center;cursor:pointer;transition:all .2s;background:#f8fafc}
+.drop-zone:hover,.drop-zone.dragover{border-color:#3b82f6;background:#eff6ff}
+.drop-zone-icon{font-size:48px;margin-bottom:12px;color:#94a3b8}
+.drop-zone-text{font-size:14px;color:#64748b}
+.drop-zone-hint{font-size:12px;color:#94a3b8;margin-top:8px}
+.progress-wrap{background:#e2e8f0;border-radius:20px;height:24px;overflow:hidden;position:relative}
+.progress-fill{height:100%;background:linear-gradient(90deg,#3b82f6,#2563eb);border-radius:20px;transition:width .3s}
+.progress-text{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:12px;font-weight:600;color:#fff}
+.task-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.task-stat{text-align:center;padding:12px;background:#f8fafc;border-radius:8px}
+.task-stat .val{font-size:20px;font-weight:700}
+.task-stat .lbl{font-size:12px;color:#64748b;margin-top:2px}
+.task-stat.s .val{color:#10b981}
+.task-stat.f .val{color:#ef4444}
+.task-stat.t .val{color:#8b5cf6}
+.task-stat.e .val{color:#f59e0b}
+.field-item{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px}
+.field-item:hover{background:#eff6ff}
+.field-info{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+.field-name{font-weight:600;color:#1e293b;font-size:14px}
+.field-desc{color:#64748b;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.field-meta{display:flex;gap:4px;flex-shrink:0;margin-left:8px}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.var-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.var-tag{padding:4px 8px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;cursor:pointer}
+.var-tag:hover{background:#3b82f6;color:#fff;border-color:#3b82f6}
+.modal-mask{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:2000}
+.modal-box{background:#fff;border-radius:12px;padding:24px;max-width:700px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.modal-title{font-size:16px;font-weight:600;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between}
+.modal-close{background:none;border:none;font-size:20px;cursor:pointer;color:#94a3b8;padding:4px}
+.modal-close:hover{color:#475569}
+.modal-body{font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-all;background:#f8fafc;padding:16px;border-radius:8px;max-height:60vh;overflow-y:auto}
+.toast-box{position:fixed;top:72px;right:24px;z-index:3000;display:flex;flex-direction:column;gap:8px}
+.toast-item{padding:12px 20px;border-radius:8px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.15);color:#fff;animation:slideIn .3s}
+.toast-success{background:#10b981}
+.toast-error{background:#ef4444}
+.toast-warning{background:#f59e0b}
+.toast-info{background:#3b82f6}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+.export-opts{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px}
+.export-opts .form-group{margin-bottom:0}
+.empty-state{text-align:center;padding:48px 24px;color:#94a3b8}
+.empty-state-icon{font-size:48px;margin-bottom:12px}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ctrl-bar{display:flex;gap:8px;margin-top:12px}
+.chk-wrap{display:flex;align-items:center;gap:6px}
+.chk-wrap input[type="checkbox"]{width:16px;height:16px;cursor:pointer}
+</style>
+<script>
+(function(){
+document.getElementById('loading').style.display = 'none';
+document.getElementById('app').style.display = 'block';
+
+if (typeof Vue === 'undefined') {
+  document.getElementById('app').innerHTML = '<div style="padding:40px;text-align:center;color:#e74c3c;font-size:16px">Vue.js 加载失败，请检查网络连接后刷新页面。<br>需要访问 cdn.jsdelivr.net</div>';
+  return;
+}
+if (typeof XLSX === 'undefined') {
+  document.getElementById('app').innerHTML = '<div style="padding:40px;text-align:center;color:#e74c3c;font-size:16px">SheetJS(XLSX) 加载失败，请检查网络连接后刷新页面。</div>';
+  return;
+}
+
+var app = Vue.createApp({
+  data: function() {
+    return {
+      tab: 'api',
+      showKey: false,
+      testing: false,
+      isDragover: false,
+      fileWarn: '',
+      toasts: [],
+      modalShow: false,
+      modalTitle: '',
+      modalBody: '',
+      api: {
+        provider: 'deepseek',
+        baseURL: 'https://api.deepseek.com/v1',
+        apiKey: '',
+        model: 'deepseek-v4-flash',
+        concurrency: 3,
+        interval: 500,
+        customModels: []
+      },
+      customModel: '',
+      presets: {
+        openai: { baseURL: 'https://api.openai.com/v1', models: ['gpt-4o','gpt-4o-mini','gpt-4.1','gpt-4.1-mini','gpt-4.1-nano'] },
+        qwen: { baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen-max','qwen-plus','qwen-turbo','qwen-long'] },
+        zhipu: { baseURL: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-4-plus','glm-4-air','glm-4','glm-4-flash'] },
+        deepseek: { baseURL: 'https://api.deepseek.com/v1', models: ['deepseek-v4-pro','deepseek-v4-flash','deepseek-chat','deepseek-reasoner'] },
+        custom: { baseURL: '', models: [] }
+      },
+      fileData: { columns: [], rows: [], fileName: '' },
+      mappedFields: [],
+      fields: [],
+      newField: { name: '', desc: '', type: 'text', required: false },
+      typeMap: { text: '文本', number: '数字', list: '列表', boolean: '布尔值' },
+      sysPrompt: '',
+      userPromptTpl: '请提取以下论文的关键信息：\n论文标题：{{篇名}}\n摘要：{{摘要}}\n关键词：{{关键词}}',
+      running: false,
+      paused: false,
+      cancelled: false,
+      progress: { total: 0, done: 0, ok: 0, fail: 0, tokens: 0, curTitle: '', startTime: 0, eta: 0 },
+      results: [],
+      editCell: null,
+      exportScope: 'all',
+      exportFmt: 'xlsx'
+    };
+  },
+  computed: {
+    modelOptions: function() {
+      var p = this.api.provider;
+      var list = [];
+      if (this.presets[p]) {
+        list = list.concat(this.presets[p].models);
+      }
+      if (p === 'custom') {
+        list = list.concat(this.api.customModels);
+      }
+      return list;
+    },
+    canStart: function() {
+      return this.api.apiKey && this.fileData.rows.length > 0 && this.fields.length > 0;
+    },
+    percent: function() {
+      if (this.progress.total === 0) return 0;
+      return Math.round(this.progress.done / this.progress.total * 100);
+    },
+    previewRows: function() {
+      return this.fileData.rows.slice(0, 10);
+    }
+  },
+  methods: {
+    toast: function(msg, type) {
+      var self = this;
+      var t = { msg: msg, type: type || 'info', id: Date.now() + Math.random() };
+      this.toasts.push(t);
+      setTimeout(function() {
+        var idx = self.toasts.indexOf(t);
+        if (idx > -1) self.toasts.splice(idx, 1);
+      }, 3000);
+    },
+    showModal: function(title, body) {
+      this.modalTitle = title;
+      this.modalBody = body;
+      this.modalShow = true;
+    },
+    onProviderChange: function() {
+      var p = this.api.provider;
+      var preset = this.presets[p];
+      if (preset) {
+        this.api.baseURL = preset.baseURL;
+        if (preset.models.length > 0) {
+          this.api.model = preset.models[0];
+        }
+      }
+    },
+    addCustomModel: function() {
+      var m = this.customModel.trim();
+      if (m && this.api.customModels.indexOf(m) === -1) {
+        this.api.customModels.push(m);
+        this.api.model = m;
+        this.customModel = '';
+      }
+    },
+    saveConfig: function() {
+      var cfg = {
+        provider: this.api.provider,
+        baseURL: this.api.baseURL,
+        apiKey: btoa(this.api.apiKey),
+        model: this.api.model,
+        concurrency: this.api.concurrency,
+        interval: this.api.interval,
+        customModels: this.api.customModels
+      };
+      localStorage.setItem('pei_api', JSON.stringify(cfg));
+      this.toast('配置已保存', 'success');
+    },
+    loadConfig: function() {
+      var raw = localStorage.getItem('pei_api');
+      if (!raw) return;
+      try {
+        var cfg = JSON.parse(raw);
+        this.api.provider = cfg.provider || 'openai';
+        this.api.baseURL = cfg.baseURL || '';
+        this.api.apiKey = cfg.apiKey ? atob(cfg.apiKey) : '';
+        this.api.model = cfg.model || '';
+        this.api.concurrency = cfg.concurrency || 3;
+        this.api.interval = cfg.interval || 500;
+        this.api.customModels = cfg.customModels || [];
+      } catch (e) {}
+    },
+    testConn: function() {
+      var self = this;
+      if (!this.api.apiKey) { this.toast('请先输入API Key', 'warning'); return; }
+      if (!this.api.baseURL) { this.toast('请先配置Base URL', 'warning'); return; }
+      this.testing = true;
+      fetch(this.api.baseURL + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + this.api.apiKey },
+        body: JSON.stringify({ model: this.api.model, messages: [{ role: 'user', content: 'Hi' }], max_tokens: 5 })
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        if (data.choices && data.choices.length > 0) {
+          self.toast('连接成功！模型响应正常', 'success');
+        } else if (data.error) {
+          self.toast('API错误: ' + (data.error.message || JSON.stringify(data.error)), 'error');
+        } else {
+          self.toast('返回数据格式异常', 'warning');
+        }
+      }).catch(function(e) {
+        self.toast('连接失败: ' + e.message, 'error');
+      }).finally(function() { self.testing = false; });
+    },
+    pickFile: function() {
+      this.$refs.fileInput.click();
+    },
+    onDrop: function(e) {
+      this.isDragover = false;
+      var files = e.dataTransfer.files;
+      if (files.length > 0) this.parseFile(files[0]);
+    },
+    onFileSelect: function(e) {
+      var files = e.target.files;
+      if (files.length > 0) this.parseFile(files[0]);
+      e.target.value = '';
+    },
+    parseFile: function(file) {
+      var self = this;
+      var ext = file.name.split('.').pop().toLowerCase();
+      if (['xlsx','xls','csv'].indexOf(ext) === -1) {
+        this.toast('不支持的文件格式，请上传 xlsx、xls 或 csv 文件', 'error');
+        return;
+      }
+      this.fileWarn = '';
+      if (file.size > 5 * 1024 * 1024) {
+        this.fileWarn = '文件大小超过5MB (' + (file.size / 1024 / 1024).toFixed(1) + 'MB)，处理可能较慢';
+      }
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          var wb = XLSX.read(e.target.result, { type: 'array' });
+          var ws = wb.Sheets[wb.SheetNames[0]];
+          var json = XLSX.utils.sheet_to_json(ws, { defval: '' });
+          if (!json.length) { self.toast('文件中没有数据', 'warning'); return; }
+          var cols = Object.keys(json[0]);
+          self.fileData = { columns: cols, rows: json, fileName: file.name };
+          self.detectMapping(cols);
+          self.toast('文件解析成功，共 ' + json.length + ' 行数据', 'success');
+        } catch (err) {
+          self.toast('文件解析失败: ' + err.message, 'error');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    },
+    detectMapping: function(cols) {
+      var rules = [
+        { pats: ['篇名','题名','标题','Title'], to: '标题' },
+        { pats: ['摘要','Abstract'], to: '摘要' },
+        { pats: ['关键词','Keywords','Keyword'], to: '关键词' },
+        { pats: ['作者','Author','Authors'], to: '作者' },
+        { pats: ['来源','期刊','Journal','Source'], to: '来源' },
+        { pats: ['发表时间','出版时间','年份','Year','Date'], to: '时间' },
+        { pats: ['DOI','doi'], to: 'DOI' }
+      ];
+      this.mappedFields = [];
+      for (var ri = 0; ri < rules.length; ri++) {
+        for (var ci = 0; ci < cols.length; ci++) {
+          for (var pi = 0; pi < rules[ri].pats.length; pi++) {
+            if (cols[ci].indexOf(rules[ri].pats[pi]) !== -1) {
+              this.mappedFields.push({ from: cols[ci], to: rules[ri].to });
+              ci = cols.length;
+              break;
+            }
+          }
+        }
+      }
+    },
+    addField: function() {
+      if (!this.newField.name.trim() || !this.newField.desc.trim()) return;
+      this.fields.push({
+        name: this.newField.name.trim(),
+        desc: this.newField.desc.trim(),
+        type: this.newField.type,
+        required: this.newField.required
+      });
+      this.newField = { name: '', desc: '', type: 'text', required: false };
+      this.toast('字段已添加', 'success');
+    },
+    removeField: function(i) {
+      this.fields.splice(i, 1);
+    },
+    loadTpl: function(type) {
+      this.fields = [];
+      if (type === 'paper') {
+        this.fields = [
+          { name: '研究主题', desc: '研究的核心问题', type: 'text', required: false },
+          { name: '研究方法', desc: '使用了哪些研究方法', type: 'text', required: false },
+          { name: '数据集', desc: '使用了哪些数据集', type: 'text', required: false },
+          { name: '主要结论', desc: '论文的主要发现', type: 'text', required: false },
+          { name: '创新点', desc: '相比已有工作的创新之处', type: 'text', required: false },
+          { name: '研究局限', desc: '论文提到的局限性', type: 'text', required: false }
+        ];
+      } else if (type === 'review') {
+        this.fields = [
+          { name: '所属领域', desc: '论文所属的研究领域', type: 'text', required: false },
+          { name: '技术路线', desc: '采用的技术路线或方法框架', type: 'text', required: false },
+          { name: '对比基线方法', desc: '与哪些基线方法进行了对比', type: 'text', required: false },
+          { name: '评价指标', desc: '使用了哪些评价指标', type: 'text', required: false },
+          { name: '实验结果', desc: '主要实验结果', type: 'text', required: false },
+          { name: '未来工作方向', desc: '论文指出的未来研究方向', type: 'text', required: false }
+        ];
+      }
+      this.genSysPrompt();
+      this.toast('模板已加载', 'success');
+    },
+    genSysPrompt: function() {
+      if (!this.fields.length) { this.toast('请先添加提取字段', 'warning'); return; }
+      var json = '{\n';
+      for (var i = 0; i < this.fields.length; i++) {
+        json += '  "' + this.fields[i].name + '": "string"';
+        if (i < this.fields.length - 1) json += ',';
+        json += '\n';
+      }
+      json += '}';
+      this.sysPrompt = '你是一个学术论文信息提取助手。请从提供的论文信息中提取关键内容，严格按照以下JSON格式输出，不要输出其他内容：\n' + json + '\n如果某个字段在论文中未提及，请填写"未提及"。';
+    },
+    insertVar: function(col) {
+      var v = '{{' + col + '}}';
+      this.userPromptTpl += v;
+    },
+    buildUserPrompt: function(row) {
+      var prompt = this.userPromptTpl;
+      for (var i = 0; i < this.fileData.columns.length; i++) {
+        var col = this.fileData.columns[i];
+        var val = row[col] || '';
+        prompt = prompt.split('{{' + col + '}}').join(val);
+      }
+      return prompt;
+    },
+    previewPrompt: function() {
+      if (!this.fileData.rows.length) return;
+      var row = this.fileData.rows[0];
+      var user = this.buildUserPrompt(row);
+      this.showModal('提示词预览（第一行数据）', '--- System Prompt ---\n' + this.sysPrompt + '\n\n--- User Prompt ---\n' + user);
+    },
+    singleTest: function() {
+      var self = this;
+      if (!this.fileData.rows.length || !this.api.apiKey) return;
+      var row = this.fileData.rows[0];
+      var user = this.buildUserPrompt(row);
+      this.toast('正在测试...', 'info');
+      this.callLLM(this.sysPrompt, user).then(function(content) {
+        self.showModal('单条测试结果', content);
+        self.toast('测试完成', 'success');
+      }).catch(function(e) {
+        self.showModal('测试失败', e.message);
+        self.toast('测试失败', 'error');
+      });
+    },
+    callLLM: function(sys, usr) {
+      return fetch(this.api.baseURL + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + this.api.apiKey },
+        body: JSON.stringify({
+          model: this.api.model,
+          messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }],
+          temperature: 0.1
+        })
+      }).then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + r.statusText);
+        return r.json();
+      }).then(function(data) {
+        if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+        if (!data.choices || !data.choices.length) throw new Error('返回数据格式异常');
+        return data.choices[0].message.content;
+      });
+    },
+    parseJSON: function(text) {
+      try {
+        var s = text.trim();
+        var m = s.match(/\{[\s\S]*\}/);
+        if (m) s = m[0];
+        return JSON.parse(s);
+      } catch (e) { return null; }
+    },
+    startTask: function() {
+      if (!this.canStart) return;
+      if (!this.sysPrompt) this.genSysPrompt();
+      this.results = [];
+      this.progress = { total: this.fileData.rows.length, done: 0, ok: 0, fail: 0, tokens: 0, curTitle: '', startTime: Date.now(), eta: 0 };
+      this.running = true;
+      this.paused = false;
+      this.cancelled = false;
+      this.runPool();
+    },
+    runPool: function() {
+      var self = this;
+      var rows = this.fileData.rows;
+      var conc = Math.min(this.api.concurrency, rows.length);
+      var idx = 0;
+      var executing = [];
+
+      function processOne(i) {
+        if (self.cancelled) return Promise.resolve();
+        return new Promise(function(resolve) {
+          function waitUnpause() {
+            if (self.cancelled) { resolve(); return; }
+            if (self.paused) { setTimeout(waitUnpause, 200); return; }
+            doWork();
+          }
+          function doWork() {
+            var row = rows[i];
+            var titleCol = self.fileData.columns[0];
+            for (var mi = 0; mi < self.mappedFields.length; mi++) {
+              if (self.mappedFields[mi].to === '标题') { titleCol = self.mappedFields[mi].from; break; }
+            }
+            self.progress.curTitle = row[titleCol] || ('第' + (i + 1) + '行');
+            var retries = 0;
+            function attempt() {
+              if (self.cancelled) { resolve(); return; }
+              var user = self.buildUserPrompt(row);
+              var inputLen = (self.sysPrompt + user).length;
+              self.callLLM(self.sysPrompt, user).then(function(content) {
+                var outputLen = content.length;
+                self.progress.tokens += Math.round(inputLen / 4 + outputLen / 4);
+                var parsed = self.parseJSON(content);
+                if (parsed) {
+                  self.results.push({ orig: row, data: parsed, status: 'success', error: '' });
+                  self.progress.ok++;
+                } else {
+                  self.results.push({ orig: row, data: {}, status: 'failed', error: 'JSON解析失败: ' + content.substring(0, 200) });
+                  self.progress.fail++;
+                }
+                self.progress.done++;
+                self.updateEta();
+                self.autoSave();
+                resolve();
+              }).catch(function(e) {
+                retries++;
+                if (retries >= 3) {
+                  self.results.push({ orig: row, data: {}, status: 'failed', error: e.message });
+                  self.progress.fail++;
+                  self.progress.done++;
+                  self.updateEta();
+                  self.autoSave();
+                  resolve();
+                } else {
+                  setTimeout(attempt, 1000);
+                }
+              });
+            }
+            attempt();
+          }
+          waitUnpause();
+        });
+      }
+
+      function next() {
+        if (self.cancelled || idx >= rows.length) {
+          Promise.all(executing).then(function() {
+            self.running = false;
+            self.progress.curTitle = '';
+            if (!self.cancelled) {
+              self.toast('提取完成！成功 ' + self.progress.ok + ' 条，失败 ' + self.progress.fail + ' 条', 'success');
+            }
+          });
+          return;
+        }
+        if (executing.length >= conc) return;
+        var p = processOne(idx);
+        idx++;
+        executing.push(p);
+        p.then(function() {
+          var pi = executing.indexOf(p);
+          if (pi > -1) executing.splice(pi, 1);
+          next();
+        });
+        if (self.api.interval > 0 && idx < rows.length) {
+          setTimeout(next, self.api.interval);
+        } else {
+          next();
+        }
+      }
+      next();
+    },
+    updateEta: function() {
+      var elapsed = Date.now() - this.progress.startTime;
+      var rate = this.progress.done / (elapsed / 1000);
+      var remaining = this.progress.total - this.progress.done;
+      this.progress.eta = rate > 0 ? Math.round(remaining / rate * 1000) : 0;
+    },
+    autoSave: function() {
+      if (this.progress.done % 10 === 0) {
+        sessionStorage.setItem('pei_results', JSON.stringify(this.results));
+      }
+    },
+    retryOne: function(idx) {
+      var self = this;
+      var r = this.results[idx];
+      var user = this.buildUserPrompt(r.orig);
+      this.callLLM(this.sysPrompt, user).then(function(content) {
+        var parsed = self.parseJSON(content);
+        if (parsed) {
+          r.data = parsed;
+          r.status = 'success';
+          r.error = '';
+          self.progress.fail--;
+          self.progress.ok++;
+          self.toast('重试成功', 'success');
+        } else {
+          self.toast('JSON解析失败', 'error');
+        }
+      }).catch(function(e) {
+        r.error = e.message;
+        self.toast('重试失败: ' + e.message, 'error');
+      });
+    },
+    getVal: function(r, fname) {
+      return r.data ? (r.data[fname] || '') : '';
+    },
+    startEdit: function(ri, fname, e) {
+      this.editCell = { ri: ri, fi: fname };
+    },
+    endEdit: function(r, fname, e) {
+      if (r.data) r.data[fname] = e.target.value;
+      this.editCell = null;
+    },
+    fmtTok: function(n) {
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+      return String(n);
+    },
+    fmtTime: function(ms) {
+      if (!ms || ms <= 0) return '--';
+      var s = Math.round(ms / 1000);
+      if (s < 60) return s + '秒';
+      var m = Math.floor(s / 60);
+      if (m < 60) return m + '分' + (s % 60) + '秒';
+      return Math.floor(m / 60) + '时' + (m % 60) + '分';
+    },
+    doExport: function() {
+      if (!this.results.length) return;
+      var i, r, obj, col, f;
+      if (this.exportFmt === 'json') {
+        var data = [];
+        for (i = 0; i < this.results.length; i++) {
+          r = this.results[i];
+          obj = {};
+          if (this.exportScope === 'all') {
+            for (col in r.orig) obj[col] = r.orig[col];
+          }
+          if (r.data) {
+            for (f = 0; f < this.fields.length; f++) obj[this.fields[f].name] = r.data[this.fields[f].name] || '';
+          }
+          obj['状态'] = r.status;
+          data.push(obj);
+        }
+        var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        this.dlBlob(blob, '提取结果.json');
+        this.toast('JSON导出成功', 'success');
+        return;
+      }
+      var rows = [];
+      for (i = 0; i < this.results.length; i++) {
+        r = this.results[i];
+        obj = { '序号': i + 1 };
+        if (this.exportScope === 'all') {
+          for (col in r.orig) obj[col] = r.orig[col];
+        }
+        if (r.data) {
+          for (f = 0; f < this.fields.length; f++) obj[this.fields[f].name] = r.data[this.fields[f].name] || '';
+        }
+        rows.push(obj);
+      }
+      var ws = XLSX.utils.json_to_sheet(rows);
+      if (this.exportFmt === 'xlsx') {
+        var wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, '提取结果');
+        XLSX.writeFile(wb, '提取结果.xlsx');
+        this.toast('Excel导出成功', 'success');
+      } else {
+        var csv = XLSX.utils.sheet_to_csv(ws);
+        var blob2 = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+        this.dlBlob(blob2, '提取结果.csv');
+        this.toast('CSV导出成功', 'success');
+      }
+    },
+    dlBlob: function(blob, name) {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    },
+    clearAll: function() {
+      localStorage.removeItem('pei_api');
+      sessionStorage.removeItem('pei_results');
+      this.results = [];
+      this.fileData = { columns: [], rows: [], fileName: '' };
+      this.mappedFields = [];
+      this.fields = [];
+      this.progress = { total: 0, done: 0, ok: 0, fail: 0, tokens: 0, curTitle: '', startTime: 0, eta: 0 };
+      this.toast('所有数据已清除', 'success');
+    }
+  },
+  mounted: function() {
+    this.loadConfig();
+    var saved = sessionStorage.getItem('pei_results');
+    if (saved) {
+      try {
+        this.results = JSON.parse(saved);
+        if (this.results.length) {
+          this.progress.done = this.results.length;
+          this.progress.ok = this.results.filter(function(r) { return r.status === 'success'; }).length;
+          this.progress.fail = this.results.filter(function(r) { return r.status === 'failed'; }).length;
+          this.progress.total = this.results.length;
+        }
+      } catch (e) {}
+    }
+  }
+});
+
+app.config.errorHandler = function(err, vm, info) {
+  console.error('Vue Error:', err, info);
+};
+
+app.mount('#app');
+
+})();
+</script>
+</body>
+</html>
