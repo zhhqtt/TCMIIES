@@ -101,6 +101,9 @@ TCMIIES/
 
 BSD 3-Clause License
 
----
+## 引用信息
 
+ZHAO H. TCMIIES: A Browser-Based LLM-Powered Intelligent Information Extraction System for Academic Literature[EB/OL]. (2026-05-08). https://doi.org/10.48550/arXiv.2605.07507.
+
+---
 > 河北大学中医药信息学实验室
